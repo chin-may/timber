@@ -23,12 +23,7 @@ def exit(server, poller):
         poller.unregister(sock)
         sock.close()
 
-def process(poller, s, queues):
-    queues[s].put("[Ok]")
-    time.sleep(5)
-    poller.modify(s, READ_WRITE)
-
-def main(server):
+def main(server,processQueue):
     logger.warn("Serving on %s" % server)
     fd_to_socket[server.fileno()] = server
     try:
@@ -37,7 +32,6 @@ def main(server):
         poller = tornado.ioloop._KQueue()
 
     poller.register(server, READ_ONLY)
-    message_queues = {}
 
     while True:
         try:
@@ -59,35 +53,24 @@ def main(server):
                     connection.setblocking(0)
                     fd_to_socket[connection.fileno()] = connection
                     poller.register(connection, READ_ONLY)
-                    message_queues[connection] = Queue.Queue()
 
                 else:
                     data = s.recv(1024)
                     if data:
-                        process(poller, s, message_queues)
+                        processQueue.put((data,fd))
                     else:
                         poller.unregister(s)
                         del fd_to_socket[s.fileno()]
                         s.close()
-                        del message_queues[s]
 
             elif flag & ERROR:
                 poller.unregister(s)
                 s.close()
 
-            elif flag & WRITE:
-                try:
-                    next_msg = message_queues[s].get_nowait()
-                except Queue.Empty:
-                    poller.modify(s, READ_ONLY)
-                else:
-                    s.send(next_msg)
-
             elif flag & select.POLLERR:
                 poller.unregister(s)
                 del fd_to_socket[s.fileno()]
                 s.close()
-                del message_queues[s]
 
 if __name__ == "__main__":
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
